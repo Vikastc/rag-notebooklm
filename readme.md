@@ -3,6 +3,9 @@
 This project is a **Retrieval-Augmented Generation (RAG) pipeline** built with **Node.js + LangChain + Qdrant**.
 It allows you to **index documents (PDF, CSV, Websites)** into a **Qdrant vector database** and then **query them via an API** using OpenAI embeddings.
 
+🔗 Live Demo: https://verbosity-ai.vercel.app
+▶️ Demo Video: https://www.youtube.com/watch?v=xySOgSjXsKs
+
 ---
 
 ## 🚀 Features
