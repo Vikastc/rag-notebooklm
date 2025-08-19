@@ -1,0 +1,152 @@
+{
+	"info": {
+		"_postman_id": "4db07227-6789-4f16-8a01-30545ab96bda",
+		"name": "Rag-model",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "30729753",
+		"_collection_link": "https://martian-comet-644842.postman.co/workspace/Team-Workspace~a3adf906-907b-46d4-8e8c-0b7a113d870e/collection/30729753-4db07227-6789-4f16-8a01-30545ab96bda?action=share&source=collection_link&creator=30729753"
+	},
+	"item": [
+		{
+			"name": "http://localhost:3000/api/chat",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\"query\":\"Can you go through the csv and explain to me about it?\",\"collectionName\":\"web_collection\",\"k\":3}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/chat",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"chat"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "http://localhost:3000/api/index/url",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\"value\":\"https://docs.chaicode.com/\",\"collectionName\":\"web_collection\"}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/index/url",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"index",
+						"url"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "http://localhost:3000/api/index/pdf",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": "/Users/vikastc/Downloads/unlock_opportunities (1).pdf"
+						},
+						{
+							"key": "collectionName",
+							"value": "pdf_collection",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/index/pdf",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"index",
+						"pdf"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "http://localhost:3000/api/index/csv",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": "/Users/vikastc/results.csv"
+						},
+						{
+							"key": "collectionName",
+							"value": "csv_collection",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/index/csv",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"index",
+						"csv"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
