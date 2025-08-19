@@ -5,10 +5,12 @@ import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
 import { RecursiveUrlLoader } from "@langchain/community/document_loaders/web/recursive_url";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { Document } from "@langchain/core/documents";
+import fs from "fs/promises";
 
 /* ---------------- Config ---------------- */
 const CONFIG = {
   QDRANT_URL: process.env.QDRANT_URL || "http://localhost:6333",
+  QDRANT_API_KEY: process.env.QDRANT_API_KEY || undefined,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "text-embedding-3-large",
   DEFAULT_PDF_COLLECTION: "pdf_collection",
   DEFAULT_WEB_COLLECTION: "web_collection",
@@ -76,6 +78,7 @@ async function insertInBatches({ docs, embeddings, collectionName }) {
   );
   vectorStore = await QdrantVectorStore.fromDocuments(batches[0], embeddings, {
     url: CONFIG.QDRANT_URL,
+    apiKey: CONFIG.QDRANT_API_KEY,
     collectionName,
   });
 
@@ -131,28 +134,48 @@ async function loadWebsite(url) {
   return cleaned;
 }
 
-/* ---------------- Main ---------------- */
-async function indexing() {
+/* ---------------- API Handler ---------------- */
+export async function indexingHandler(req, res) {
+  let tempFilePath = null;
   try {
-    const argType = req.params.type; // "pdf" | "url"
-    const argValue = req.body.value;
+    const argType = (req.params.type || "").toLowerCase(); // "pdf" | "url"
+    const providedCollection = req.body?.collectionName;
 
     if (!["pdf", "url"].includes(argType)) {
-      console.error("❌ Invalid type. Use 'pdf' or 'url'.");
-      //   process.exit(1);
+      return res
+        .status(400)
+        .json({ error: "Invalid type. Use 'pdf' or 'url'." });
     }
 
     const embeddings = new OpenAIEmbeddings({ model: CONFIG.EMBEDDING_MODEL });
 
     let docs = [];
-    let collectionName = "";
+    let collectionName =
+      providedCollection ||
+      (argType === "pdf"
+        ? CONFIG.DEFAULT_PDF_COLLECTION
+        : CONFIG.DEFAULT_WEB_COLLECTION);
 
     if (argType === "pdf") {
-      docs = await loadPDF(argValue);
-      collectionName = CONFIG.DEFAULT_PDF_COLLECTION;
+      // Prefer uploaded file if present, otherwise fall back to body.value which should be a server path
+      if (req.file?.path) {
+        tempFilePath = req.file.path;
+        docs = await loadPDF(tempFilePath);
+      } else if (req.body?.value) {
+        docs = await loadPDF(req.body.value);
+      } else {
+        return res
+          .status(400)
+          .json({ error: "Missing PDF file upload or 'value' file path." });
+      }
     } else {
-      docs = await loadWebsite(argValue);
-      collectionName = CONFIG.DEFAULT_WEB_COLLECTION;
+      const url = req.body?.value || req.body?.url;
+      if (!url) {
+        return res
+          .status(400)
+          .json({ error: "Missing 'value' or 'url' in request body." });
+      }
+      docs = await loadWebsite(url);
     }
 
     if (!docs.length) {
@@ -162,10 +185,24 @@ async function indexing() {
 
     await insertInBatches({ docs, embeddings, collectionName });
 
-    return res.status(200).json({ message: "Ingestion complete" });
+    return res.status(200).json({
+      message: "Ingestion complete",
+      inserted: docs.length,
+      collectionName,
+    });
   } catch (err) {
     console.error("🔥 Error in ingestion:", err);
-    return res.status(500).json({ error: "Ingestion failed" });
-    // process.exit(1);
+    return res.status(500).json({
+      error: "Ingestion failed",
+      details: err?.message || String(err),
+    });
+  } finally {
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch {}
+    }
   }
 }
+
+export default indexingHandler;

@@ -2,45 +2,60 @@ import "dotenv/config";
 import { OpenAI } from "openai";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { QdrantVectorStore } from "@langchain/qdrant";
-import readline from "readline";
 
 const client = new OpenAI();
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
+const CONFIG = {
+  QDRANT_URL: process.env.QDRANT_URL || "http://localhost:6333",
+  DEFAULT_COLLECTION: process.env.DEFAULT_COLLECTION || "web_collection",
+  EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "text-embedding-3-large",
+  CHAT_MODEL: process.env.CHAT_MODEL || "gpt-4o-mini",
+  TOP_K: Number(process.env.TOP_K || 3),
+};
 
-function askQuestion(query = "") {
-  return new Promise((resolve) => rl.question(query, resolve));
+function formatContext(chunks) {
+  if (!Array.isArray(chunks) || chunks.length === 0) return "";
+  return chunks
+    .map((d, idx) => {
+      const meta = d.metadata || {};
+      const source = meta.source || meta.url || "unknown";
+      const page = Number.isFinite(meta.page) ? ` (Page ${meta.page})` : "";
+      return `#${idx + 1} Source: ${source}${page}\n${d.pageContent}`;
+    })
+    .join("\n\n---\n\n");
 }
 
-async function chat() {
-  const userQuery = await askQuestion("Enter your query: ");
-  rl.close();
-  if (!userQuery) {
-    console.error("❌ Query cannot be empty.");
-    return;
-  }
-  const embeddings = new OpenAIEmbeddings({
-    model: "text-embedding-3-large",
-  });
+export async function chatHandler(req, res) {
+  try {
+    const query = req.body?.query || req.body?.q;
+    const collectionName =
+      req.body?.collectionName || CONFIG.DEFAULT_COLLECTION;
+    const topK = Number(req.body?.k) || CONFIG.TOP_K;
+    const history = Array.isArray(req.body?.history) ? req.body.history : [];
 
-  const vectorStore = await QdrantVectorStore.fromExistingCollection(
-    embeddings,
-    {
-      url: "http://localhost:6333",
-      collectionName: "web_collection",
+    if (!query) {
+      return res
+        .status(400)
+        .json({ error: "Missing 'query' in request body." });
     }
-  );
 
-  const vectorRetriever = vectorStore.asRetriever({
-    k: 3,
-  });
+    const embeddings = new OpenAIEmbeddings({ model: CONFIG.EMBEDDING_MODEL });
+    const vectorStore = await QdrantVectorStore.fromExistingCollection(
+      embeddings,
+      {
+        url: CONFIG.QDRANT_URL,
+        collectionName,
+      }
+    );
 
-  const relevantChunks = await vectorRetriever.invoke(userQuery);
+    const retriever = vectorStore.asRetriever({ k: topK });
+    const relevantChunks = await retriever.invoke(query);
+    console.log("Relevant chunks:", relevantChunks);
 
-  const SYSTEM_PROMPT = `You are an AI assistant who fetchs relavant information from the PDF file with 
+    const contextText = formatContext(relevantChunks);
+    console.log("Formatted context text:", contextText);
+
+    const systemPrompt = `You are an AI assistant who fetchs relavant information from the PDF file with 
     the content and page number according to the user query.
     - Only answer from the available context file 
 
@@ -51,25 +66,35 @@ async function chat() {
     - example: You can change the default code editor in your system to vscode. To do this, you need to use the following command:
         git config --global core.editor "code --wait"
         (Source: 'https://docs.chaicode.com/youtube/chai-aur-git/terminology/')
+        
             
-    Context: ${JSON.stringify(relevantChunks)}
+    Context: ${JSON.stringify(contextText)}
     `;
 
-  const response = await client.chat.completions.create({
-    model: "gpt-4",
-    messages: [
-      {
-        role: "system",
-        content: SYSTEM_PROMPT,
-      },
-      {
-        role: "user",
-        content: userQuery,
-      },
-    ],
-  });
+    const messages = [
+      { role: "system", content: systemPrompt },
+      ...history,
+      { role: "user", content: query },
+    ];
 
-  const assistantReply = response.choices[0].message.content;
-  console.log("Assistant Reply> ", assistantReply);
+    const response = await client.chat.completions.create({
+      model: CONFIG.CHAT_MODEL,
+      messages,
+      // temperature: 0.2,
+    });
+
+    const answer = response.choices?.[0]?.message?.content || "";
+    return res.status(200).json({
+      answer,
+      sources: relevantChunks[0].metadata,
+      usedCollection: collectionName,
+    });
+  } catch (err) {
+    console.error("🔥 Chat error:", err);
+    return res
+      .status(500)
+      .json({ error: "Chat failed", details: err?.message || String(err) });
+  }
 }
-// chat();
+
+export default chatHandler;
