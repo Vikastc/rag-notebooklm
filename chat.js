@@ -50,10 +50,8 @@ export async function chatHandler(req, res) {
 
     const retriever = vectorStore.asRetriever({ k: topK });
     const relevantChunks = await retriever.invoke(query);
-    console.log("Relevant chunks:", relevantChunks);
 
     const contextText = formatContext(relevantChunks);
-    console.log("Formatted context text:", contextText);
 
     const systemPrompt = `You are an AI assistant who fetchs relavant information from the PDF file with 
     the content and page number according to the user query.
@@ -66,7 +64,7 @@ export async function chatHandler(req, res) {
     - example: You can change the default code editor in your system to vscode. To do this, you need to use the following command:
         git config --global core.editor "code --wait"
         (Source: 'https://docs.chaicode.com/youtube/chai-aur-git/terminology/')
-        
+
             
     Context: ${JSON.stringify(contextText)}
     `;

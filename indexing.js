@@ -2,6 +2,7 @@ import "dotenv/config";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { QdrantVectorStore } from "@langchain/qdrant";
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
+import { CSVLoader } from "@langchain/community/document_loaders/fs/csv";
 import { RecursiveUrlLoader } from "@langchain/community/document_loaders/web/recursive_url";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { Document } from "@langchain/core/documents";
@@ -10,9 +11,9 @@ import fs from "fs/promises";
 /* ---------------- Config ---------------- */
 const CONFIG = {
   QDRANT_URL: process.env.QDRANT_URL || "http://localhost:6333",
-  QDRANT_API_KEY: process.env.QDRANT_API_KEY || undefined,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "text-embedding-3-large",
   DEFAULT_PDF_COLLECTION: "pdf_collection",
+  DEFAULT_CSV_COLLECTION: "csv_collection",
   DEFAULT_WEB_COLLECTION: "web_collection",
   CHUNK_SIZE: Number(process.env.CHUNK_SIZE || 1000),
   CHUNK_OVERLAP: Number(process.env.CHUNK_OVERLAP || 100),
@@ -78,7 +79,6 @@ async function insertInBatches({ docs, embeddings, collectionName }) {
   );
   vectorStore = await QdrantVectorStore.fromDocuments(batches[0], embeddings, {
     url: CONFIG.QDRANT_URL,
-    apiKey: CONFIG.QDRANT_API_KEY,
     collectionName,
   });
 
@@ -120,6 +120,17 @@ async function loadPDF(filePath) {
   return cleaned;
 }
 
+async function loadCSV(filePath) {
+  console.log(`📄 Loading CSV: ${filePath}`);
+  const rawDocs = await new CSVLoader(filePath).load();
+  console.log(`   ✅ Loaded ${rawDocs.length} docs from CSV`);
+
+  const split = await splitDocuments(rawDocs);
+  const cleaned = cleanDocuments(split, filePath);
+  console.log(`   ✂️ Split into ${cleaned.length} chunks`);
+  return cleaned;
+}
+
 async function loadWebsite(url) {
   console.log(`🌐 Crawling website: ${url}`);
   const rawDocs = await new RecursiveUrlLoader(url, {
@@ -138,13 +149,13 @@ async function loadWebsite(url) {
 export async function indexingHandler(req, res) {
   let tempFilePath = null;
   try {
-    const argType = (req.params.type || "").toLowerCase(); // "pdf" | "url"
+    const argType = (req.params.type || "").toLowerCase(); // "pdf" | "csv" | "url"
     const providedCollection = req.body?.collectionName;
 
-    if (!["pdf", "url"].includes(argType)) {
+    if (!["pdf", "csv", "url"].includes(argType)) {
       return res
         .status(400)
-        .json({ error: "Invalid type. Use 'pdf' or 'url'." });
+        .json({ error: "Invalid type. Use 'pdf', 'csv', or 'url'." });
     }
 
     const embeddings = new OpenAIEmbeddings({ model: CONFIG.EMBEDDING_MODEL });
@@ -154,10 +165,11 @@ export async function indexingHandler(req, res) {
       providedCollection ||
       (argType === "pdf"
         ? CONFIG.DEFAULT_PDF_COLLECTION
+        : argType === "csv"
+        ? CONFIG.DEFAULT_CSV_COLLECTION
         : CONFIG.DEFAULT_WEB_COLLECTION);
 
     if (argType === "pdf") {
-      // Prefer uploaded file if present, otherwise fall back to body.value which should be a server path
       if (req.file?.path) {
         tempFilePath = req.file.path;
         docs = await loadPDF(tempFilePath);
@@ -168,7 +180,18 @@ export async function indexingHandler(req, res) {
           .status(400)
           .json({ error: "Missing PDF file upload or 'value' file path." });
       }
-    } else {
+    } else if (argType === "csv") {
+      if (req.file?.path) {
+        tempFilePath = req.file.path;
+        docs = await loadCSV(tempFilePath);
+      } else if (req.body?.value) {
+        docs = await loadCSV(req.body.value);
+      } else {
+        return res
+          .status(400)
+          .json({ error: "Missing CSV file upload or 'value' file path." });
+      }
+    } else if (argType === "url") {
       const url = req.body?.value || req.body?.url;
       if (!url) {
         return res
