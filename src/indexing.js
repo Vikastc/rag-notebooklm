@@ -14,7 +14,7 @@ const CONFIG = {
   QDRANT_URL: process.env.QDRANT_URL || "http://localhost:6333",
   PROVIDER: process.env.PROVIDER || "google",
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "text-embedding-3-large",
-  GOOGLE_EMBED_MODEL: process.env.GOOGLE_EMBED_MODEL || "models/embedding-001",
+  GOOGLE_EMBED_MODEL: process.env.GOOGLE_EMBED_MODEL || "models/text-embedding-004",
   DEFAULT_PDF_COLLECTION: "pdf_collection",
   DEFAULT_CSV_COLLECTION: "csv_collection",
   DEFAULT_WEB_COLLECTION: "web_collection",

@@ -19,8 +19,8 @@ const CONFIG = {
   CHAT_MODEL: process.env.CHAT_MODEL || "gpt-4o-mini",
 
   // Google
-  GOOGLE_EMBED_MODEL: process.env.GOOGLE_EMBED_MODEL || "models/embedding-001",
-  GOOGLE_CHAT_MODEL: process.env.GOOGLE_CHAT_MODEL || "gemini-1.5-flash",
+  GOOGLE_EMBED_MODEL: process.env.GOOGLE_EMBED_MODEL || "models/text-embedding-004",
+  GOOGLE_CHAT_MODEL: process.env.GOOGLE_CHAT_MODEL || "gemini-2.5-flash",
 
   TOP_K: Number(process.env.TOP_K || 3),
 };
