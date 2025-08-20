@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { OpenAIEmbeddings } from "@langchain/openai";
+import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 import { QdrantVectorStore } from "@langchain/qdrant";
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
 import { CSVLoader } from "@langchain/community/document_loaders/fs/csv";
@@ -11,7 +12,9 @@ import fs from "fs/promises";
 /* ---------------- Config ---------------- */
 const CONFIG = {
   QDRANT_URL: process.env.QDRANT_URL || "http://localhost:6333",
+  PROVIDER: process.env.PROVIDER || "google",
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "text-embedding-3-large",
+  GOOGLE_EMBED_MODEL: process.env.GOOGLE_EMBED_MODEL || "models/embedding-001",
   DEFAULT_PDF_COLLECTION: "pdf_collection",
   DEFAULT_CSV_COLLECTION: "csv_collection",
   DEFAULT_WEB_COLLECTION: "web_collection",
@@ -158,7 +161,13 @@ export async function indexingHandler(req, res) {
         .json({ error: "Invalid type. Use 'pdf', 'csv', or 'url'." });
     }
 
-    const embeddings = new OpenAIEmbeddings({ model: CONFIG.EMBEDDING_MODEL });
+    const embeddings =
+      CONFIG.PROVIDER === "google"
+        ? new GoogleGenerativeAIEmbeddings({
+            apiKey: process.env.GOOGLE_API_KEY,
+            model: CONFIG.GOOGLE_EMBED_MODEL,
+          })
+        : new OpenAIEmbeddings({ model: CONFIG.EMBEDDING_MODEL });
 
     let docs = [];
     let collectionName =

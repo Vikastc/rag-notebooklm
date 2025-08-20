@@ -2,14 +2,26 @@ import "dotenv/config";
 import { OpenAI } from "openai";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { QdrantVectorStore } from "@langchain/qdrant";
+import {
+  ChatGoogleGenerativeAI,
+  GoogleGenerativeAIEmbeddings,
+} from "@langchain/google-genai";
 
 const client = new OpenAI();
 
 const CONFIG = {
+  PROVIDER: process.env.PROVIDER || "google", // "openai" or "google"
   QDRANT_URL: process.env.QDRANT_URL || "http://localhost:6333",
   DEFAULT_COLLECTION: process.env.DEFAULT_COLLECTION || "web_collection",
+
+  // OpenAI
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "text-embedding-3-large",
   CHAT_MODEL: process.env.CHAT_MODEL || "gpt-4o-mini",
+
+  // Google
+  GOOGLE_EMBED_MODEL: process.env.GOOGLE_EMBED_MODEL || "models/embedding-001",
+  GOOGLE_CHAT_MODEL: process.env.GOOGLE_CHAT_MODEL || "gemini-1.5-flash",
+
   TOP_K: Number(process.env.TOP_K || 3),
 };
 
@@ -50,7 +62,14 @@ export async function chatHandler(req, res) {
         .json({ error: "Missing 'query' in request body." });
     }
 
-    const embeddings = new OpenAIEmbeddings({ model: CONFIG.EMBEDDING_MODEL });
+    const embeddings =
+      CONFIG.PROVIDER === "google"
+        ? new GoogleGenerativeAIEmbeddings({
+            apiKey: process.env.GOOGLE_API_KEY,
+            model: CONFIG.GOOGLE_EMBED_MODEL,
+          })
+        : new OpenAIEmbeddings({ model: CONFIG.EMBEDDING_MODEL });
+
     const vectorStore = await QdrantVectorStore.fromExistingCollection(
       embeddings,
       {
@@ -88,16 +107,27 @@ export async function chatHandler(req, res) {
       { role: "user", content: query },
     ];
 
-    const response = await client.chat.completions.create({
-      model: CONFIG.CHAT_MODEL,
-      messages,
-      // temperature: 0.2,
-    });
+    let answer = "";
 
-    const answer = response.choices?.[0]?.message?.content || "";
+    if (CONFIG.PROVIDER === "google") {
+      const chatModel = new ChatGoogleGenerativeAI({
+        apiKey: process.env.GOOGLE_API_KEY,
+        model: CONFIG.GOOGLE_CHAT_MODEL,
+      });
+
+      const response = await chatModel.invoke(messages);
+      answer = response?.content || "";
+    } else {
+      const response = await client.chat.completions.create({
+        model: CONFIG.CHAT_MODEL,
+        messages,
+      });
+      answer = response.choices?.[0]?.message?.content || "";
+    }
+
     return res.status(200).json({
       answer,
-      sources: relevantChunks[0].metadata,
+      sources: relevantChunks.map((c) => c.metadata),
       usedCollection: collectionName,
     });
   } catch (err) {
