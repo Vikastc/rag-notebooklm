@@ -13,16 +13,27 @@ const CONFIG = {
   TOP_K: Number(process.env.TOP_K || 3),
 };
 
-function formatContext(chunks) {
-  if (!Array.isArray(chunks) || chunks.length === 0) return "";
-  return chunks
-    .map((d, idx) => {
-      const meta = d.metadata || {};
-      const source = meta.source || meta.url || "unknown";
-      const page = Number.isFinite(meta.page) ? ` (Page ${meta.page})` : "";
-      return `#${idx + 1} Source: ${source}${page}\n${d.pageContent}`;
-    })
-    .join("\n\n---\n\n");
+function formatSources(chunks) {
+  return chunks.map((d, idx) => {
+    const meta = d.metadata || {};
+    let sourceText = "";
+
+    if (meta.source?.startsWith("http") || meta.url?.startsWith("http")) {
+      // Website source
+      const url = meta.source || meta.url;
+      sourceText = `(Source: '${url}')`;
+    } else if (Number.isFinite(meta.page)) {
+      // PDF/CSV with page number
+      sourceText = `(Source: Page ${meta.page})`;
+    }
+
+    return {
+      id: idx + 1,
+      content: d.pageContent,
+      source: sourceText,
+      title: meta.title || undefined,
+    };
+  });
 }
 
 export async function chatHandler(req, res) {
@@ -51,17 +62,19 @@ export async function chatHandler(req, res) {
     const retriever = vectorStore.asRetriever({ k: topK });
     const relevantChunks = await retriever.invoke(query);
 
-    const contextText = formatContext(relevantChunks);
+    const contextText = formatSources(relevantChunks);
 
     const systemPrompt = `You are an AI assistant who fetchs relavant information from the PDF file with 
     the content and page number according to the user query.
     - Only answer from the available context file 
 
-    - example: CORD is a purpose-built decentralised infrastructure designed to be a global public utility and enable a trust framework.
+    // If it is a PDF file or a csv file, then you can use the following format:
+    - example_1: CORD is a purpose-built decentralised infrastructure designed to be a global public utility and enable a trust framework.
     context
     (Source: Page 23 - 27)
 
-    - example: You can change the default code editor in your system to vscode. To do this, you need to use the following command:
+    // If it is a website, then you can use the following format:
+    - example_2: You can change the default code editor in your system to vscode. To do this, you need to use the following command:
         git config --global core.editor "code --wait"
         (Source: 'https://docs.chaicode.com/youtube/chai-aur-git/terminology/')
 
