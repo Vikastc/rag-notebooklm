@@ -4,27 +4,27 @@ import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 import { QdrantVectorStore } from "@langchain/qdrant";
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
 import { CSVLoader } from "@langchain/community/document_loaders/fs/csv";
+import { HtmlToTextTransformer } from "@langchain/community/document_transformers/html_to_text";
 import { RecursiveUrlLoader } from "@langchain/community/document_loaders/web/recursive_url";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { Document } from "@langchain/core/documents";
 import fs from "fs/promises";
 
-/* ---------------- Config ---------------- */
 const CONFIG = {
   QDRANT_URL: process.env.QDRANT_URL || "http://localhost:6333",
   PROVIDER: process.env.PROVIDER || "google",
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "text-embedding-3-large",
-  GOOGLE_EMBED_MODEL: process.env.GOOGLE_EMBED_MODEL || "models/text-embedding-004",
+  GOOGLE_EMBED_MODEL:
+    process.env.GOOGLE_EMBED_MODEL || "models/text-embedding-004",
   DEFAULT_PDF_COLLECTION: "pdf_collection",
   DEFAULT_CSV_COLLECTION: "csv_collection",
   DEFAULT_WEB_COLLECTION: "web_collection",
   CHUNK_SIZE: Number(process.env.CHUNK_SIZE || 1000),
   CHUNK_OVERLAP: Number(process.env.CHUNK_OVERLAP || 100),
-  BATCH_SIZE: Number(process.env.BATCH_SIZE || 100), // safe size
-  CONCURRENCY: Number(process.env.CONCURRENCY || 10), // how many batches to insert in parallel
+  BATCH_SIZE: Number(process.env.BATCH_SIZE || 100),
+  CONCURRENCY: Number(process.env.CONCURRENCY || 10),
 };
 
-/* ---------------- Helpers ---------------- */
 function chunkArray(arr, size) {
   return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
     arr.slice(i * size, i * size + size)
@@ -32,29 +32,33 @@ function chunkArray(arr, size) {
 }
 
 function cleanDocuments(docs, fallbackSource = "") {
-  return docs.map((d) => {
-    const meta = d.metadata || {};
-    const outMeta = {};
+  return docs
+    .map((d) => {
+      const meta = d.metadata || {};
+      const outMeta = {};
 
-    if (meta.source) outMeta.source = meta.source;
-    if (meta.url) outMeta.url = meta.url;
-    if (meta.title) outMeta.title = meta.title;
+      if (meta.source) outMeta.source = meta.source;
+      if (meta.url) outMeta.url = meta.url;
+      if (meta.title) outMeta.title = meta.title;
 
-    const page =
-      meta.pageNumber ??
-      meta.page ??
-      meta.loc?.pageNumber ??
-      meta.pdf?.page ??
-      meta.pdf?.pagenumber;
-    if (Number.isFinite(page)) outMeta.page = page;
+      const page =
+        meta.pageNumber ??
+        meta.page ??
+        meta.loc?.pageNumber ??
+        meta.pdf?.page ??
+        meta.pdf?.pagenumber;
+      if (Number.isFinite(page)) outMeta.page = page;
 
-    if (!outMeta.source && fallbackSource) outMeta.source = fallbackSource;
+      if (!outMeta.source && fallbackSource) outMeta.source = fallbackSource;
 
-    return new Document({
-      pageContent: d.pageContent ?? "",
-      metadata: outMeta,
-    });
-  });
+      return new Document({
+        pageContent: d.pageContent ?? "",
+        metadata: outMeta,
+      });
+    })
+    .filter(
+      (d) => d.pageContent.length > 50 && !d.pageContent.startsWith("Skip to")
+    );
 }
 
 async function splitDocuments(rawDocs) {
@@ -65,7 +69,6 @@ async function splitDocuments(rawDocs) {
   return splitter.splitDocuments(rawDocs);
 }
 
-/* ---------------- Insert Logic ---------------- */
 async function insertInBatches({ docs, embeddings, collectionName }) {
   const batches = chunkArray(docs, CONFIG.BATCH_SIZE);
   if (!batches.length) return;
@@ -76,7 +79,6 @@ async function insertInBatches({ docs, embeddings, collectionName }) {
 
   let vectorStore = null;
 
-  // first batch creates collection
   console.log(
     `📦 Creating collection with first batch (${batches[0].length} docs)...`
   );
@@ -85,7 +87,6 @@ async function insertInBatches({ docs, embeddings, collectionName }) {
     collectionName,
   });
 
-  // remaining batches added concurrently (limited by CONCURRENCY)
   const remaining = batches.slice(1);
   for (let i = 0; i < remaining.length; i += CONFIG.CONCURRENCY) {
     const group = remaining.slice(i, i + CONFIG.CONCURRENCY);
@@ -111,27 +112,18 @@ async function insertInBatches({ docs, embeddings, collectionName }) {
   );
 }
 
-/* ---------------- Loaders ---------------- */
 async function loadPDF(filePath) {
   console.log(`📄 Loading PDF: ${filePath}`);
   const rawDocs = await new PDFLoader(filePath).load();
-  console.log(`   ✅ Loaded ${rawDocs.length} docs from PDF`);
-
   const split = await splitDocuments(rawDocs);
-  const cleaned = cleanDocuments(split, filePath);
-  console.log(`   ✂️ Split into ${cleaned.length} chunks`);
-  return cleaned;
+  return cleanDocuments(split, filePath);
 }
 
 async function loadCSV(filePath) {
   console.log(`📄 Loading CSV: ${filePath}`);
   const rawDocs = await new CSVLoader(filePath).load();
-  console.log(`   ✅ Loaded ${rawDocs.length} docs from CSV`);
-
   const split = await splitDocuments(rawDocs);
-  const cleaned = cleanDocuments(split, filePath);
-  console.log(`   ✂️ Split into ${cleaned.length} chunks`);
-  return cleaned;
+  return cleanDocuments(split, filePath);
 }
 
 async function loadWebsite(url) {
@@ -140,19 +132,19 @@ async function loadWebsite(url) {
     maxDepth: 2,
     excludeDirs: ["#"],
   }).load();
-  console.log(`   ✅ Loaded ${rawDocs.length} docs from website`);
 
-  const split = await splitDocuments(rawDocs);
-  const cleaned = cleanDocuments(split, url);
-  console.log(`   ✂️ Split into ${cleaned.length} chunks`);
-  return cleaned;
+  const transformer = new HtmlToTextTransformer();
+  const textDocs = await transformer.transformDocuments(rawDocs);
+
+  const split = await splitDocuments(textDocs);
+  return cleanDocuments(split, url);
 }
 
-/* ---------------- API Handler ---------------- */
+// Api Handlers
 export async function indexingHandler(req, res) {
   let tempFilePath = null;
   try {
-    const argType = (req.params.type || "").toLowerCase(); // "pdf" | "csv" | "url"
+    const argType = (req.params.type || "").toLowerCase();
     const providedCollection = req.body?.collectionName;
 
     if (!["pdf", "csv", "url"].includes(argType)) {
@@ -211,7 +203,6 @@ export async function indexingHandler(req, res) {
     }
 
     if (!docs.length) {
-      console.warn("⚠️ No documents to insert.");
       return res.status(400).json({ error: "No documents to insert" });
     }
 
