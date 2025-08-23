@@ -114,20 +114,18 @@ async function generateSubqueries(rewrittenQuery) {
   }
 }
 
-async function generateHyDE(query) {
+async function generateHyDEBatch(subqueries) {
   const prompt = `
     You are assisting a Retrieval-Augmented Generation (RAG) system.
-    Given the user query below, generate a hypothetical but detailed answer. 
-    This answer will NOT be shown to the user—it is only used to enrich embeddings.
+    For EACH of the following queries, generate a hypothetical but detailed answer. 
+    These answers will NOT be shown to the user—they are only used to enrich embeddings.
 
     Rules:
-    - Stay factual-sounding but it's okay if the details are not exact.
-    - Be descriptive and long enough to capture the semantics.
-    - Do not say "hypothetical"; just output a natural paragraph.
+    - Write one paragraph per query.
+    - Stay factual-sounding but it's okay if details are not exact.
+    - Output ONLY a JSON array of strings, each string is one hypothetical answer.
 
-    User query: "${query}"
-
-    Hypothetical answer:
+    Queries: ${JSON.stringify(subqueries)}
   `;
 
   if (CONFIG.PROVIDER === "google") {
@@ -138,13 +136,23 @@ async function generateHyDE(query) {
     const response = await chatModel.invoke([
       { role: "user", content: prompt },
     ]);
-    return response?.content?.trim() || query;
+    const raw = response?.content?.trim() || "[]";
+    try {
+      return JSON.parse(raw.match(/\[.*\]/s)?.[0] || "[]");
+    } catch {
+      return subqueries;
+    }
   } else {
     const response = await client.chat.completions.create({
       model: CONFIG.CHAT_MODEL,
       messages: [{ role: "user", content: prompt }],
     });
-    return response.choices?.[0]?.message?.content?.trim() || query;
+    const raw = response.choices?.[0]?.message?.content?.trim() || "[]";
+    try {
+      return JSON.parse(raw.match(/\[.*\]/s)?.[0] || "[]");
+    } catch {
+      return subqueries;
+    }
   }
 }
 
@@ -152,27 +160,33 @@ async function retrieveAndRank(vectorStore, subqueries, topK) {
   const retriever = vectorStore.asRetriever({ k: topK });
   const scoreMap = new Map();
 
-  for (const sub of subqueries) {
-    // 🔑 HyDE step: create a richer hypothetical doc
-    const hydeDoc = await generateHyDE(sub);
+  // Step 1: Generate HyDE docs in one go
+  const hydeDocs = await generateHyDEBatch(subqueries);
 
-    // Use HyDE doc instead of plain subquery
-    const results = await retriever.invoke(hydeDoc);
+  // Safety: fallback to original subqueries if HyDE fails
+  const queriesToRun =
+    hydeDocs.length === subqueries.length ? hydeDocs : subqueries;
 
+  // Step 2: Run retrieval in parallel
+  const resultsArray = await Promise.all(
+    queriesToRun.map((q) => retriever.invoke(q))
+  );
+
+  // Step 3: Rank results by vote count
+  for (const results of resultsArray) {
     for (const doc of results) {
       const key = doc.id || doc.pageContent.slice(0, 50); // unique-ish key
       const current = scoreMap.get(key) || { doc, score: 0 };
-      current.score += 1; // vote count
+      current.score += 1;
       scoreMap.set(key, current);
     }
   }
 
-  // Sort by votes
-  const ranked = [...scoreMap.values()]
+  // Step 4: Sort + pick topK
+  return [...scoreMap.values()]
     .sort((a, b) => b.score - a.score)
-    .map((x) => x.doc);
-
-  return ranked.slice(0, topK);
+    .map((x) => x.doc)
+    .slice(0, topK);
 }
 
 // Main chat handler
