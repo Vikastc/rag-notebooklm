@@ -18,6 +18,7 @@ const CONFIG = {
     process.env.GOOGLE_EMBED_MODEL || "models/text-embedding-004",
   DEFAULT_PDF_COLLECTION: "pdf_collection",
   DEFAULT_CSV_COLLECTION: "csv_collection",
+  DEFAULT_VTT_COLLECTION: "vtt_collection",
   DEFAULT_WEB_COLLECTION: "web_collection",
   CHUNK_SIZE: Number(process.env.CHUNK_SIZE || 1000),
   CHUNK_OVERLAP: Number(process.env.CHUNK_OVERLAP || 100),
@@ -32,7 +33,7 @@ function chunkArray(arr, size) {
 }
 
 function cleanDocuments(docs, fallbackSource = "") {
-  return docs
+  const cleaned = docs
     .map((d) => {
       const meta = d.metadata || {};
       const outMeta = {};
@@ -40,6 +41,11 @@ function cleanDocuments(docs, fallbackSource = "") {
       if (meta.source) outMeta.source = meta.source;
       if (meta.url) outMeta.url = meta.url;
       if (meta.title) outMeta.title = meta.title;
+
+      // Preserve VTT timestamps
+      if (meta.startTime) outMeta.startTime = meta.startTime;
+      if (meta.endTime) outMeta.endTime = meta.endTime;
+      if (meta.type) outMeta.type = meta.type;
 
       const page =
         meta.pageNumber ??
@@ -56,9 +62,19 @@ function cleanDocuments(docs, fallbackSource = "") {
         metadata: outMeta,
       });
     })
-    .filter(
-      (d) => d.pageContent.length > 50 && !d.pageContent.startsWith("Skip to")
-    );
+    .filter((d) => {
+      const keep =
+        d.pageContent.length > 5 && !d.pageContent.startsWith("Skip to");
+      if (!keep) {
+        console.log(
+          `🚮 Filtering out: "${d.pageContent}" (length: ${d.pageContent.length})`
+        );
+      }
+      return keep;
+    });
+
+  console.log(`✅ Kept ${cleaned.length} documents after cleaning`);
+  return cleaned;
 }
 
 async function splitDocuments(rawDocs) {
@@ -126,6 +142,74 @@ async function loadCSV(filePath) {
   return cleanDocuments(split, filePath);
 }
 
+async function parseVTTContent(content, filePath) {
+  const lines = content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line);
+  const cues = [];
+  let i = 0;
+
+  // Skip WEBVTT header
+  while (i < lines.length && !lines[i].includes("-->")) {
+    i++;
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Check if this line is a timestamp
+    if (line && line.includes("-->")) {
+      const [startTime, endTime] = line.split("-->").map((t) => t.trim());
+
+      // Collect text lines after timestamp
+      const textLines = [];
+      i++;
+      while (i < lines.length && !lines[i].includes("-->")) {
+        textLines.push(lines[i]);
+        i++;
+      }
+
+      if (textLines.length > 0) {
+        const text = textLines
+          .join(" ")
+          .replace(/<[^>]*>/g, "")
+          .trim();
+        if (text.length > 0) {
+          cues.push({
+            startTime,
+            endTime,
+            text,
+          });
+        }
+      }
+    } else {
+      i++;
+    }
+  }
+
+  return cues.map(
+    (cue) =>
+      new Document({
+        pageContent: cue.text,
+        metadata: {
+          source: filePath,
+          startTime: cue.startTime,
+          endTime: cue.endTime,
+          type: "vtt",
+        },
+      })
+  );
+}
+
+async function loadVTT(filePath) {
+  console.log(`📄 Loading VTT: ${filePath}`);
+  const content = await fs.readFile(filePath, "utf-8");
+  const docs = await parseVTTContent(content, filePath);
+
+  return cleanDocuments(docs, filePath);
+}
+
 async function loadWebsite(url) {
   console.log(`🌐 Crawling website: ${url}`);
   const rawDocs = await new RecursiveUrlLoader(url, {
@@ -147,10 +231,10 @@ export async function indexingHandler(req, res) {
     const argType = (req.params.type || "").toLowerCase();
     const providedCollection = req.body?.collectionName;
 
-    if (!["pdf", "csv", "url"].includes(argType)) {
-      return res
-        .status(400)
-        .json({ error: "Invalid type. Use 'pdf', 'csv', or 'url'." });
+    if (!["pdf", "csv", "vtt", "url"].includes(argType)) {
+      return res.status(400).json({
+        error: "Invalid type. Use 'pdf', 'csv', 'vtt', or 'url'.",
+      });
     }
 
     const embeddings =
@@ -168,6 +252,8 @@ export async function indexingHandler(req, res) {
         ? CONFIG.DEFAULT_PDF_COLLECTION
         : argType === "csv"
         ? CONFIG.DEFAULT_CSV_COLLECTION
+        : argType === "vtt"
+        ? CONFIG.DEFAULT_VTT_COLLECTION
         : CONFIG.DEFAULT_WEB_COLLECTION);
 
     if (argType === "pdf") {
@@ -191,6 +277,17 @@ export async function indexingHandler(req, res) {
         return res
           .status(400)
           .json({ error: "Missing CSV file upload or 'value' file path." });
+      }
+    } else if (argType === "vtt") {
+      if (req.file?.path) {
+        tempFilePath = req.file.path;
+        docs = await loadVTT(tempFilePath);
+      } else if (req.body?.value) {
+        docs = await loadVTT(req.body.value);
+      } else {
+        return res
+          .status(400)
+          .json({ error: "Missing VTT file upload or 'value' file path." });
       }
     } else if (argType === "url") {
       const url = req.body?.value || req.body?.url;

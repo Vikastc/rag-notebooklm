@@ -34,6 +34,7 @@ function buildContext(chunks) {
 
       Source: ${c.metadata?.source || c.metadata?.url || "Unknown"}
       ${c.metadata?.title ? `Title: ${c.metadata.title}` : ""}
+      ${c.metadata?.startTime && c.metadata?.endTime ? `Timestamp: ${c.metadata.startTime} --> ${c.metadata.endTime}` : ""}
       `
     )
     .join("\n\n");
@@ -253,9 +254,18 @@ export async function chatHandler(req, res) {
       answer = response.choices?.[0]?.message?.content || "";
     }
 
+    // Extract timestamps from VTT sources
+    const sourcesWithTimestamps = optimizedChunks.map((c) => ({
+      ...c.metadata,
+      text: c.pageContent,
+      timestamp: c.metadata?.startTime && c.metadata?.endTime 
+        ? `${c.metadata.startTime} --> ${c.metadata.endTime}` 
+        : null
+    }));
+
     return res.status(200).json({
       answer,
-      sources: optimizedChunks.map((c) => c.metadata),
+      sources: sourcesWithTimestamps,
       usedCollection: collectionName,
       rewrittenSubqueries: rewrittenSubqueries.subqueries,
     });
