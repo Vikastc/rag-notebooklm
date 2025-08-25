@@ -22,7 +22,7 @@ const CONFIG = {
   GOOGLE_CHAT_MODEL: process.env.GOOGLE_CHAT_MODEL || "gemini-2.5-flash",
 
   TOP_K: Number(process.env.TOP_K || 3),
-  SUBQUERY_COUNT: Number(process.env.SUBQUERY_COUNT || 3),
+  SUBQUERY_COUNT: Number(process.env.SUBQUERY_COUNT || 2),
 };
 
 function buildContext(chunks) {
@@ -39,9 +39,10 @@ function buildContext(chunks) {
     .join("\n\n");
 }
 
-async function rewriteQuery(query) {
-  const rewritePrompt = `
-    You are assisting a Retrieval-Augmented Generation (RAG) system. 
+// Step 1: rewrite + subqueries in one call
+async function rewriteAndSubqueries(query) {
+  const prompt = `
+  You are assisting a Retrieval-Augmented Generation (RAG) system. 
     Rewrite the user's query into a clearer, more descriptive form 
     that works better for retrieving relevant chunks from documents. 
 
@@ -50,67 +51,46 @@ async function rewriteQuery(query) {
     - Do NOT invent facts.
     - Keep it short, descriptive, and directly tied to the user's intent.
 
-    User query: "${query}"
-    Rewritten search query:
-  `;
-
-  if (CONFIG.PROVIDER === "google") {
-    const chatModel = new ChatGoogleGenerativeAI({
-      apiKey: process.env.GOOGLE_API_KEY,
-      model: CONFIG.GOOGLE_CHAT_MODEL,
-    });
-    const response = await chatModel.invoke([
-      { role: "user", content: rewritePrompt },
-    ]);
-    return response?.content?.trim() || query;
-  } else {
-    const response = await client.chat.completions.create({
-      model: CONFIG.CHAT_MODEL,
-      messages: [{ role: "user", content: rewritePrompt }],
-    });
-    return response.choices?.[0]?.message?.content?.trim() || query;
-  }
-}
-
-async function generateSubqueries(rewrittenQuery) {
-  const prompt = `
-    You are generating retrieval subqueries for a RAG system.
+  Then generate ${CONFIG.SUBQUERY_COUNT} diverse subqueries.
 
     Task:
     - Break down the following rewritten query into ${CONFIG.SUBQUERY_COUNT} diverse subqueries.
     - Each subquery should capture a slightly different angle or phrasing.
     - Keep them concise.
 
-    Rewritten query: "${rewrittenQuery}"
+    Return JSON:
+    {
+      "rewritten": "<rewritten query>",
+      "subqueries": ["q1", "q2", ...]
+    }
 
-    Return them as a JSON array of strings.
+    Query: "${query}"
   `;
 
-  if (CONFIG.PROVIDER === "google") {
-    const chatModel = new ChatGoogleGenerativeAI({
-      apiKey: process.env.GOOGLE_API_KEY,
-      model: CONFIG.GOOGLE_CHAT_MODEL,
-    });
-    const response = await chatModel.invoke([
-      { role: "user", content: prompt },
-    ]);
-    const raw = response?.content?.trim() || "[]";
-    try {
-      return JSON.parse(raw.match(/\[.*\]/s)?.[0] || "[]");
-    } catch {
-      return [rewrittenQuery];
-    }
-  } else {
-    const response = await client.chat.completions.create({
-      model: CONFIG.CHAT_MODEL,
-      messages: [{ role: "user", content: prompt }],
-    });
-    const raw = response.choices?.[0]?.message?.content?.trim() || "[]";
-    try {
-      return JSON.parse(raw.match(/\[.*\]/s)?.[0] || "[]");
-    } catch {
-      return [rewrittenQuery];
-    }
+  const model =
+    CONFIG.PROVIDER === "google"
+      ? new ChatGoogleGenerativeAI({
+          apiKey: process.env.GOOGLE_API_KEY,
+          model: CONFIG.GOOGLE_CHAT_MODEL,
+        })
+      : client.chat.completions;
+
+  const response =
+    CONFIG.PROVIDER === "google"
+      ? await model.invoke([{ role: "user", content: prompt }])
+      : await model.create({
+          model: CONFIG.CHAT_MODEL,
+          messages: [{ role: "user", content: prompt }],
+        });
+
+  const raw =
+    CONFIG.PROVIDER === "google"
+      ? response.content
+      : response.choices?.[0]?.message?.content;
+  try {
+    return JSON.parse(raw.match(/\{.*\}/s)[0]);
+  } catch {
+    return { rewritten: query, subqueries: [query] };
   }
 }
 
@@ -220,15 +200,16 @@ export async function chatHandler(req, res) {
       }
     );
 
-    // Step 1: rewrite query
-    const rewritten = await rewriteQuery(query);
-    console.log("✍️ Rewritten query:", rewritten);
+    // Step 1: rewrite query and generate subqueries
+    const rewrittenSubqueries = await rewriteAndSubqueries(query);
+    console.log("🔍 Rewritten & Subqueries:", rewrittenSubqueries);
 
-    // Step 2: generate subqueries
-    const subqueries = await generateSubqueries(rewritten);
-
-    // Step 3: retrieve + rank
-    let optimizedChunks = await retrieveAndRank(vectorStore, subqueries, topK);
+    // Step 2: retrieve + rank
+    let optimizedChunks = await retrieveAndRank(
+      vectorStore,
+      rewrittenSubqueries.subqueries,
+      topK
+    );
 
     if (!optimizedChunks.length) {
       return res.status(200).json({
@@ -238,7 +219,7 @@ export async function chatHandler(req, res) {
       });
     }
 
-    // Step 4: Build context and answer
+    // Step 3: Build context and answer
     const contextText = buildContext(optimizedChunks);
 
     const systemPrompt = `
@@ -276,7 +257,7 @@ export async function chatHandler(req, res) {
       answer,
       sources: optimizedChunks.map((c) => c.metadata),
       usedCollection: collectionName,
-      subqueries,
+      rewrittenSubqueries: rewrittenSubqueries.subqueries,
     });
   } catch (err) {
     console.error("🔥 Chat error:", err);
