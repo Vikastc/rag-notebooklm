@@ -11,7 +11,7 @@ import { Document } from "@langchain/core/documents";
 import fs from "fs/promises";
 
 const CONFIG = {
-  QDRANT_URL: process.env.QDRANT_URL || "http://localhost:6333",
+  QDRANT_URL: process.env.QDRANT_URL,
   PROVIDER: process.env.PROVIDER || "google",
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "text-embedding-3-large",
   GOOGLE_EMBED_MODEL:
@@ -84,6 +84,7 @@ async function insertInBatches({ docs, embeddings, collectionName }) {
   );
   vectorStore = await QdrantVectorStore.fromDocuments(batches[0], embeddings, {
     url: CONFIG.QDRANT_URL,
+    apiKey: process.env.QDRANT_API_KEY,
     collectionName,
   });
 

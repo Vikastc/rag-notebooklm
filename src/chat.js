@@ -11,7 +11,7 @@ const client = new OpenAI();
 
 const CONFIG = {
   PROVIDER: process.env.PROVIDER || "google",
-  QDRANT_URL: process.env.QDRANT_URL || "http://localhost:6333",
+  QDRANT_URL: process.env.QDRANT_URL,
   DEFAULT_COLLECTION: process.env.DEFAULT_COLLECTION || "web_collection",
 
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "text-embedding-3-large",
@@ -196,6 +196,7 @@ export async function chatHandler(req, res) {
       embeddings,
       {
         url: CONFIG.QDRANT_URL,
+        apiKey: process.env.QDRANT_API_KEY,
         collectionName,
       }
     );
