@@ -9,8 +9,41 @@ import os from "os";
 import indexingHandler from "./indexing.js";
 import chatHandler from "./chat.js";
 
+// ── Startup validation ─────────────────────────────────────────────────────
+const PROVIDER = (process.env.PROVIDER || "google").trim();
+
+if (!process.env.QDRANT_URL) {
+  console.error("❌  Missing QDRANT_URL in .env");
+  console.error("    Copy .env.example → .env and fill in your values.");
+  process.exit(1);
+}
+
+if (PROVIDER === "google") {
+  if (!process.env.GOOGLE_API_KEY || process.env.GOOGLE_API_KEY.startsWith("your_")) {
+    console.error("❌  Missing or placeholder GOOGLE_API_KEY in .env");
+    console.error("    Get your key at: https://aistudio.google.com/app/apikey");
+    console.error("    Copy .env.example → .env and fill in your values.");
+    process.exit(1);
+  }
+} else if (PROVIDER === "openai") {
+  if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.startsWith("your_")) {
+    console.error("❌  Missing or placeholder OPENAI_API_KEY in .env");
+    console.error("    Get your key at: https://platform.openai.com/api-keys");
+    console.error("    Copy .env.example → .env and fill in your values.");
+    process.exit(1);
+  }
+} else {
+  console.error(`❌  Invalid PROVIDER="${PROVIDER}" in .env  — must be "google" or "openai"`);
+  process.exit(1);
+}
+
+console.log(`✅  Provider   : ${PROVIDER}`);
+console.log(`✅  Qdrant URL : ${process.env.QDRANT_URL}`);
+// ──────────────────────────────────────────────────────────────────────────
+
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "127.0.0.1";
 
 // Middleware
 app.use(helmet());
@@ -47,6 +80,6 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: "Internal Server Error" });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server listening on http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`🚀 Server listening on http://${HOST}:${PORT}`);
 });
