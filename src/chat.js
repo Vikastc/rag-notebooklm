@@ -7,10 +7,8 @@ import {
   GoogleGenerativeAIEmbeddings,
 } from "@langchain/google-genai";
 
-const client = new OpenAI();
-
 const CONFIG = {
-  PROVIDER: process.env.PROVIDER || "google",
+  PROVIDER: (process.env.PROVIDER || "google").trim(),
   QDRANT_URL: process.env.QDRANT_URL,
   DEFAULT_COLLECTION: process.env.DEFAULT_COLLECTION || "web_collection",
 
@@ -24,6 +22,10 @@ const CONFIG = {
   TOP_K: Number(process.env.TOP_K || 3),
   SUBQUERY_COUNT: Number(process.env.SUBQUERY_COUNT || 2),
 };
+
+function getOpenAIClient() {
+  return new OpenAI();
+}
 
 function buildContext(chunks) {
   return chunks
@@ -73,7 +75,7 @@ async function rewriteAndSubqueries(query) {
           apiKey: process.env.GOOGLE_API_KEY,
           model: CONFIG.GOOGLE_CHAT_MODEL,
         })
-      : client.chat.completions;
+      : getOpenAIClient().chat.completions;
 
   const response =
     CONFIG.PROVIDER === "google"
@@ -123,7 +125,7 @@ async function generateHyDEBatch(subqueries) {
       return subqueries;
     }
   } else {
-    const response = await client.chat.completions.create({
+    const response = await getOpenAIClient().chat.completions.create({
       model: CONFIG.CHAT_MODEL,
       messages: [{ role: "user", content: prompt }],
     });
@@ -214,7 +216,7 @@ export async function chatHandler(req, res) {
 
     if (!optimizedChunks.length) {
       return res.status(200).json({
-        answer: "Sorry, I couldn’t find relevant information in the documents.",
+        answer: "Sorry, I couldn't find relevant information in the documents.",
         sources: [],
         usedCollection: collectionName,
       });
@@ -247,7 +249,7 @@ export async function chatHandler(req, res) {
       const response = await chatModel.invoke(messages);
       answer = response?.content || "";
     } else {
-      const response = await client.chat.completions.create({
+      const response = await getOpenAIClient().chat.completions.create({
         model: CONFIG.CHAT_MODEL,
         messages,
       });

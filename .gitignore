@@ -4,3 +4,4 @@ cloned-site/
 .vscode/
 output/
 .env
+!.env.example

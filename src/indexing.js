@@ -12,7 +12,7 @@ import fs from "fs/promises";
 
 const CONFIG = {
   QDRANT_URL: process.env.QDRANT_URL,
-  PROVIDER: process.env.PROVIDER || "google",
+  PROVIDER: (process.env.PROVIDER || "google").trim(),
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "text-embedding-3-large",
   GOOGLE_EMBED_MODEL:
     process.env.GOOGLE_EMBED_MODEL || "models/text-embedding-004",
